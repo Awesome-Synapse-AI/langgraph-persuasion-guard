@@ -104,6 +104,7 @@ class PersuasionGuardGraphTests(unittest.TestCase):
 
         self.assertEqual(result["phase"], "EXECUTION")
         self.assertIn("Task Objective", result["genesis_brief"])
+        self.assertTrue(result["sanitizer_required"])
         self.assertEqual(result["execution_history"][-1].content, "Here is the deployment script.")
 
     def test_execution_follow_up_bypasses_router_on_later_turns(self):
@@ -114,7 +115,16 @@ class PersuasionGuardGraphTests(unittest.TestCase):
             models={
                 "router": router,
                 "sanitizer": FakeListChatModel(
-                    responses=["# Task Objective\nWrite the deployment script."]
+                    responses=[
+                        "# Task Objective\nWrite the deployment script.",
+                        json.dumps(
+                            {
+                                "requires_sanitizer": False,
+                                "confidence": 0.95,
+                                "reasoning": "purely technical follow-up",
+                            }
+                        ),
+                    ]
                 ),
                 "executor": FakeListChatModel(
                     responses=[

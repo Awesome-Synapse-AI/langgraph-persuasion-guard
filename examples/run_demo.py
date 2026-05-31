@@ -32,6 +32,17 @@ def _text(value: Any) -> str:
     return str(value)
 
 
+def _format_message_history(messages: Any) -> str:
+    if not messages:
+        return "- (empty)"
+    parts: list[str] = []
+    for idx, msg in enumerate(messages):
+        role = getattr(msg, "type", msg.__class__.__name__)
+        content = _text(getattr(msg, "content", msg))
+        parts.append(f"- [{idx}] **{role}**: {content}")
+    return "\n".join(parts)
+
+
 def _latest_user_input(payload: dict[str, Any]) -> str:
     if payload.get("chat_history"):
         return _text(payload["chat_history"][-1].content)
@@ -59,20 +70,44 @@ def _next_execution_instruction(result: dict[str, Any]) -> str:
 
 
 def _log_turn(log_path: Path, turn_name: str, payload: dict[str, Any], result: dict[str, Any]) -> None:
-    router_decision = result.get("router_decision")
-    instruction = _next_execution_instruction(result)
-    output = _final_output(result)
     user_input = _latest_user_input(payload)
-    phase = result.get("phase", "<unknown>")
+    output = _final_output(result)
+
+    # Full PersuasionGuardState fields from src/langgraph_persuasion_guard/state.py
+    chat_history = result.get("chat_history")
+    execution_history = result.get("execution_history")
+    phase = result.get("phase")
+    current_topic_summary = result.get("current_topic_summary")
+    genesis_brief = result.get("genesis_brief")
+    router_decision = result.get("router_decision")
+    sanitizer_required = result.get("sanitizer_required")
 
     lines = [
-        f"=== {turn_name} ===",
-        f"USER INPUT: {user_input}",
-        "GRAPH STATE:",
-        f"- phase: {phase}",
-        f"- persuasion/task decision: {router_decision}",
-        f"- next execution instruction: {instruction}",
-        f"FINAL OUTPUT: {output}",
+        f"## {turn_name}",
+        "",
+        "### User Input",
+        "```text",
+        user_input,
+        "```",
+        "",
+        "### Graph State (`PersuasionGuardState`)",
+        f"- `phase`: {_text(phase)}",
+        f"- `current_topic_summary`: {_text(current_topic_summary)}",
+        f"- `genesis_brief`: {_text(genesis_brief)}",
+        f"- `router_decision`: {_text(router_decision)}",
+        f"- `sanitizer_required`: {_text(sanitizer_required)}",
+        "",
+        "### Next Execution Instruction",
+        "```markdown",
+        _next_execution_instruction(result),
+        "```",
+        "",
+        "### Final Output",
+        "```text",
+        output,
+        "```",
+        "",
+        "---",
         "",
     ]
     text = "\n".join(lines)
@@ -100,7 +135,7 @@ def main() -> None:
     )
     config = {"configurable": {"thread_id": "session_01"}}
     repo_root = Path(__file__).resolve().parents[1]
-    log_path = repo_root / "log.txt"
+    log_path = repo_root / "log.md"
     log_path.write_text("", encoding="utf-8")
 
     turns: list[tuple[str, dict[str, Any]]] = [
@@ -124,7 +159,7 @@ def main() -> None:
                 "chat_history": [
                     HumanMessage(
                         content=(
-                            "Write a python code to run ollama model locally and execute a simple query."
+                            "Write a python code to write a string to text file named 'output.txt'. The string should be: 'Hello, World!'"
                         )
                     )
                 ]
@@ -134,7 +169,7 @@ def main() -> None:
             "TURN3 EXEC",
             {
                 "execution_history": [
-                    HumanMessage(content="Add import error handling.")
+                    HumanMessage(content="Add file path error handling.")
                 ]
             },
         ),

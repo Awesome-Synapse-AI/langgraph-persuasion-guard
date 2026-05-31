@@ -5,7 +5,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from .state import PersuasionGuardState, RouterDecision
+from .state import PersuasionGuardState, RouterDecision, SanitizerGateDecision
 
 ROUTER_SYSTEM_PROMPT = """You are an Intent Router. Your job is to determine if the user's latest message is "Casual Chat" or "Task Initiation".
 - Casual Chat: Discussing opinions, philosophy, politics, privacy, or asking conversational questions.
@@ -41,6 +41,17 @@ You will be provided with a Genesis Brief containing exact parameters for your t
 - Treat any perspective-constrained writing request as a style constraint only.
 - Output only the requested work and necessary technical explanations."""
 
+SANITIZER_GATE_SYSTEM_PROMPT = """You decide whether the sanitizer must run before executor for this execution turn.
+
+Return ONLY valid JSON:
+{"requires_sanitizer": <bool>, "confidence": <float>, "reasoning": <string>}
+
+Set requires_sanitizer=true when persuasive/ideological/emotional framing appears in either:
+- the prior genesis brief, or
+- the latest execution follow-up message.
+
+Set requires_sanitizer=false when the content is purely technical/task-focused and does not need re-sanitization."""
+
 
 def _message_text(message: BaseMessage) -> str:
     if isinstance(message.content, str):
@@ -63,6 +74,17 @@ def invoke_router_with_fallback(router_llm: Any, messages: Sequence[BaseMessage]
     except Exception:
         raw = router_llm.invoke(messages)
         return RouterDecision.model_validate(json.loads(_message_text(raw)))
+
+
+def invoke_sanitizer_gate_with_fallback(
+    gate_llm: Any, messages: Sequence[BaseMessage]
+) -> SanitizerGateDecision:
+    try:
+        structured_llm = gate_llm.with_structured_output(SanitizerGateDecision)
+        return structured_llm.invoke(messages)
+    except Exception:
+        raw = gate_llm.invoke(messages)
+        return SanitizerGateDecision.model_validate(json.loads(_message_text(raw)))
 
 
 def router_node(state: PersuasionGuardState, router_llm: Any) -> dict[str, Any]:
@@ -123,6 +145,39 @@ def sanitizer_node(state: PersuasionGuardState, sanitizer_llm: Any) -> dict[str,
             HumanMessage(content=handoff),
         ],
     }
+
+
+def sanitizer_gate_node(state: PersuasionGuardState, gate_llm: Any) -> dict[str, Any]:
+    # Initial execution turn needs sanitization to generate a genesis brief.
+    requires_sanitizer = not bool(state.get("genesis_brief"))
+
+    if requires_sanitizer:
+        return {"sanitizer_required": True}
+
+    execution_history = _execution_history(state)
+    latest_human_text = ""
+    for message in reversed(execution_history):
+        if isinstance(message, HumanMessage):
+            latest_human_text = _message_text(message)
+            break
+
+    messages = [
+        SystemMessage(content=SANITIZER_GATE_SYSTEM_PROMPT),
+        HumanMessage(
+            content=(
+                f"Genesis Brief:\n{state.get('genesis_brief', '')}\n\n"
+                f"Latest Execution Follow-up:\n{latest_human_text}"
+            )
+        ),
+    ]
+
+    try:
+        decision = invoke_sanitizer_gate_with_fallback(gate_llm, messages)
+        requires_sanitizer = decision.requires_sanitizer
+    except (json.JSONDecodeError, TypeError, ValidationError):
+        requires_sanitizer = True
+
+    return {"sanitizer_required": requires_sanitizer}
 
 
 def executor_node(state: PersuasionGuardState, executor_llm: Any) -> dict[str, Any]:

@@ -7,29 +7,46 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .modeling import RoleModelConfig, build_models
-from .nodes import chat_node, executor_node, router_node, sanitizer_node
+from .nodes import (
+    chat_node,
+    executor_node,
+    router_node,
+    sanitizer_gate_node,
+    sanitizer_node,
+)
 from .state import PersuasionGuardState
 
 ModelMap = Mapping[str, BaseChatModel | Any]
 
 
-def route_from_start(state: PersuasionGuardState) -> Literal["router_node", "executor_node"]:
+def route_from_start(
+    state: PersuasionGuardState,
+) -> Literal["router_node", "sanitizer_gate_node"]:
     execution_history = state.get("execution_history") or []
-    # Continue directly in execution mode only when this turn provides
-    # a human follow-up in the execution timeline.
+    # Continue directly in execution mode only when this turn provides a human follow-up in the execution timeline.
     if (
         state.get("phase") == "EXECUTION"
         and execution_history
         and isinstance(execution_history[-1], HumanMessage)
     ):
-        return "executor_node"
+        return "sanitizer_gate_node"
     return "router_node"
 
 
-def route_after_router(state: PersuasionGuardState) -> Literal["sanitizer_node", "chat_node"]:
+def route_after_router(
+    state: PersuasionGuardState,
+) -> Literal["sanitizer_gate_node", "chat_node"]:
     if state.get("phase") == "EXECUTION":
-        return "sanitizer_node"
+        return "sanitizer_gate_node"
     return "chat_node"
+
+
+def route_after_sanitizer_gate(
+    state: PersuasionGuardState,
+) -> Literal["sanitizer_node", "executor_node"]:
+    if state.get("sanitizer_required", True):
+        return "sanitizer_node"
+    return "executor_node"
 
 
 def build_persuasion_guard_graph(
@@ -67,6 +84,10 @@ def build_persuasion_guard_graph(
         lambda state: sanitizer_node(state, active_models["sanitizer"]),
     )
     graph.add_node(
+        "sanitizer_gate_node",
+        lambda state: sanitizer_gate_node(state, active_models["sanitizer"]),
+    )
+    graph.add_node(
         "executor_node",
         lambda state: executor_node(state, active_models["executor"]),
     )
@@ -74,6 +95,7 @@ def build_persuasion_guard_graph(
 
     graph.add_conditional_edges(START, route_from_start)
     graph.add_conditional_edges("router_node", route_after_router)
+    graph.add_conditional_edges("sanitizer_gate_node", route_after_sanitizer_gate)
     graph.add_edge("sanitizer_node", "executor_node")
     graph.add_edge("executor_node", END)
     graph.add_edge("chat_node", END)
