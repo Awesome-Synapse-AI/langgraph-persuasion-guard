@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
@@ -13,7 +14,14 @@ ModelMap = Mapping[str, BaseChatModel | Any]
 
 
 def route_from_start(state: PersuasionGuardState) -> Literal["router_node", "executor_node"]:
-    if state.get("phase") == "EXECUTION" and state.get("execution_history"):
+    execution_history = state.get("execution_history") or []
+    # Continue directly in execution mode only when this turn provides
+    # a human follow-up in the execution timeline.
+    if (
+        state.get("phase") == "EXECUTION"
+        and execution_history
+        and isinstance(execution_history[-1], HumanMessage)
+    ):
         return "executor_node"
     return "router_node"
 

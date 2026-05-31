@@ -149,6 +149,47 @@ class PersuasionGuardGraphTests(unittest.TestCase):
         )
         self.assertEqual(router.calls, 1)
 
+    def test_chat_turn_after_execution_reenters_router(self):
+        router = StructuredRouterModel(
+            RouterDecision(is_task=True, confidence=0.98, reasoning="task"),
+            RouterDecision(is_task=False, confidence=0.9, reasoning="back to chat"),
+        )
+        guard = create_persuasion_guard(
+            models={
+                "router": router,
+                "sanitizer": FakeListChatModel(
+                    responses=["# Task Objective\nWrite the deployment script."]
+                ),
+                "executor": FakeListChatModel(responses=["Initial executor response."]),
+                "chat": FakeListChatModel(
+                    responses=["Sure, let's chat about unrelated topics.", "chat summary"]
+                ),
+            }
+        )
+        config = {"configurable": {"thread_id": "chat-after-exec"}}
+
+        guard.invoke(
+            {
+                "chat_history": [HumanMessage(content="Write a deployment script.")],
+                "current_topic_summary": "Deployment",
+            },
+            config,
+        )
+        result = guard.invoke(
+            {
+                "chat_history": [
+                    HumanMessage(content="Actually, what do you think about Thai food?")
+                ]
+            },
+            config,
+        )
+
+        self.assertEqual(result["phase"], "CHAT")
+        self.assertEqual(
+            result["chat_history"][-1].content, "Sure, let's chat about unrelated topics."
+        )
+        self.assertEqual(router.calls, 2)
+
     def test_router_fallback_parses_json_when_structured_output_is_unavailable(self):
         model = JsonRouterModel(
             json.dumps(
