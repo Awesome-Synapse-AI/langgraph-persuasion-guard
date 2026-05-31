@@ -5,7 +5,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from .modeling import build_models
+from .modeling import RoleModelConfig, build_models
 from .nodes import chat_node, executor_node, router_node, sanitizer_node
 from .state import PersuasionGuardState
 
@@ -27,9 +27,26 @@ def route_after_router(state: PersuasionGuardState) -> Literal["sanitizer_node",
 def build_persuasion_guard_graph(
     models: ModelMap | None = None,
     *,
+    default_model: str | None = None,
+    default_provider: str | None = None,
+    role_model_overrides: Mapping[
+        Literal["router", "sanitizer", "executor", "chat"], RoleModelConfig
+    ]
+    | None = None,
+    use_env: bool = True,
     checkpointer: Any | None = None,
 ):
-    active_models = dict(models or build_models())
+    if models is not None:
+        active_models = dict(models)
+    else:
+        active_models = dict(
+            build_models(
+                default_model=default_model,
+                default_provider=default_provider,
+                role_overrides=role_model_overrides,
+                use_env=use_env,
+            )
+        )
     required = {"router", "sanitizer", "executor", "chat"}
     missing = required.difference(active_models)
     if missing:
@@ -59,6 +76,20 @@ def build_persuasion_guard_graph(
 def create_persuasion_guard(
     models: ModelMap | None = None,
     *,
+    default_model: str | None = None,
+    default_provider: str | None = None,
+    role_model_overrides: Mapping[
+        Literal["router", "sanitizer", "executor", "chat"], RoleModelConfig
+    ]
+    | None = None,
+    use_env: bool = True,
     checkpointer: Any | None = None,
 ):
-    return build_persuasion_guard_graph(models=models, checkpointer=checkpointer)
+    return build_persuasion_guard_graph(
+        models=models,
+        default_model=default_model,
+        default_provider=default_provider,
+        role_model_overrides=role_model_overrides,
+        use_env=use_env,
+        checkpointer=checkpointer,
+    )
