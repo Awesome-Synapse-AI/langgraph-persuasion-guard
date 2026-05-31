@@ -1,8 +1,9 @@
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import BaseTool
 from pydantic import ValidationError
 
 from .state import PersuasionGuardState, RouterDecision, SanitizerGateDecision
@@ -65,6 +66,15 @@ def _chat_history(state: PersuasionGuardState) -> list[BaseMessage]:
 
 def _execution_history(state: PersuasionGuardState) -> list[BaseMessage]:
     return list(state.get("execution_history", []))
+
+
+def _serialize_tool_output(output: Any) -> str:
+    if isinstance(output, str):
+        return output
+    try:
+        return json.dumps(output)
+    except TypeError:
+        return str(output)
 
 
 def invoke_router_with_fallback(router_llm: Any, messages: Sequence[BaseMessage]) -> RouterDecision:
@@ -180,9 +190,78 @@ def sanitizer_gate_node(state: PersuasionGuardState, gate_llm: Any) -> dict[str,
     return {"sanitizer_required": requires_sanitizer}
 
 
-def executor_node(state: PersuasionGuardState, executor_llm: Any) -> dict[str, Any]:
-    response = executor_llm.invoke(_execution_history(state))
-    return {"execution_history": [response], "phase": "EXECUTION"}
+def executor_node(
+    state: PersuasionGuardState,
+    executor_llm: Any,
+    *,
+    tools_by_name: Mapping[str, BaseTool] | None = None,
+    max_tool_round_trips: int = 8,
+) -> dict[str, Any]:
+    history = _execution_history(state)
+    response = executor_llm.invoke(history)
+    appended_messages: list[BaseMessage] = [response]
+    tool_call_count = 0
+
+    if not tools_by_name:
+        return {"execution_history": appended_messages, "phase": "EXECUTION"}
+
+    current_response = response
+    rounds = 0
+    while (
+        rounds < max_tool_round_trips
+        and isinstance(current_response, AIMessage)
+        and current_response.tool_calls
+    ):
+        tool_messages: list[ToolMessage] = []
+        for tool_call in current_response.tool_calls:
+            tool_name = tool_call.get("name", "")
+            tool_call_id = tool_call.get("id", "")
+            tool_args = tool_call.get("args", {})
+            tool = tools_by_name.get(tool_name)
+            if tool is None:
+                tool_messages.append(
+                    ToolMessage(
+                        content=f"Tool '{tool_name}' is not available.",
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                        status="error",
+                    )
+                )
+                continue
+
+            try:
+                tool_result = tool.invoke(tool_args)
+                tool_messages.append(
+                    ToolMessage(
+                        content=_serialize_tool_output(tool_result),
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                    )
+                )
+            except Exception as exc:
+                tool_messages.append(
+                    ToolMessage(
+                        content=f"Tool '{tool_name}' failed: {exc}",
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                        status="error",
+                    )
+                )
+            tool_call_count += 1
+
+        if not tool_messages:
+            break
+
+        appended_messages.extend(tool_messages)
+        rounds += 1
+        current_response = executor_llm.invoke([*history, *appended_messages])
+        appended_messages.append(current_response)
+
+    return {
+        "execution_history": appended_messages,
+        "phase": "EXECUTION",
+        "tool_call_count": tool_call_count,
+    }
 
 
 def chat_node(state: PersuasionGuardState, chat_llm: Any) -> dict[str, Any]:

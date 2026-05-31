@@ -1,8 +1,9 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
@@ -52,6 +53,8 @@ def route_after_sanitizer_gate(
 def build_persuasion_guard_graph(
     models: ModelMap | None = None,
     *,
+    tools: Sequence[BaseTool] | None = None,
+    max_tool_round_trips: int = 8,
     default_model: str | None = None,
     default_provider: str | None = None,
     role_model_overrides: Mapping[
@@ -78,6 +81,13 @@ def build_persuasion_guard_graph(
         raise ValueError(f"Missing required models: {', '.join(sorted(missing))}")
 
     graph = StateGraph(PersuasionGuardState)
+    bound_executor = active_models["executor"]
+    tool_map: dict[str, BaseTool] = {}
+    if tools:
+        tool_map = {tool.name: tool for tool in tools}
+        if hasattr(bound_executor, "bind_tools"):
+            bound_executor = bound_executor.bind_tools(list(tool_map.values()))
+
     graph.add_node("router_node", lambda state: router_node(state, active_models["router"]))
     graph.add_node(
         "sanitizer_node",
@@ -89,7 +99,12 @@ def build_persuasion_guard_graph(
     )
     graph.add_node(
         "executor_node",
-        lambda state: executor_node(state, active_models["executor"]),
+        lambda state: executor_node(
+            state,
+            bound_executor,
+            tools_by_name=tool_map,
+            max_tool_round_trips=max_tool_round_trips,
+        ),
     )
     graph.add_node("chat_node", lambda state: chat_node(state, active_models["chat"]))
 
@@ -106,6 +121,8 @@ def build_persuasion_guard_graph(
 def create_persuasion_guard(
     models: ModelMap | None = None,
     *,
+    tools: Sequence[BaseTool] | None = None,
+    max_tool_round_trips: int = 8,
     default_model: str | None = None,
     default_provider: str | None = None,
     role_model_overrides: Mapping[
@@ -117,6 +134,8 @@ def create_persuasion_guard(
 ):
     return build_persuasion_guard_graph(
         models=models,
+        tools=tools,
+        max_tool_round_trips=max_tool_round_trips,
         default_model=default_model,
         default_provider=default_provider,
         role_model_overrides=role_model_overrides,

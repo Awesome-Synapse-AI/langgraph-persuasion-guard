@@ -13,6 +13,14 @@ class RouterDecision(BaseModel):
     reasoning: str = Field(description="Brief explanation of the classification.")
 
 
+class SanitizerGateDecision(BaseModel):
+    requires_sanitizer: bool = Field(
+        description="True if the execution turn should be re-sanitized before executor."
+    )
+    confidence: float = Field(description="Confidence score between 0.0 and 1.0.")
+    reasoning: str = Field(description="Brief explanation of the decision.")
+
+
 class PersuasionGuardState(TypedDict, total=False):
     chat_history: Annotated[list[BaseMessage], add_messages]
     execution_history: Annotated[list[BaseMessage], add_messages]
@@ -20,3 +28,5 @@ class PersuasionGuardState(TypedDict, total=False):
     current_topic_summary: str
     genesis_brief: str | None
     router_decision: RouterDecision | None
+    sanitizer_required: bool | None
+    tool_call_count: int | None
