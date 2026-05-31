@@ -68,6 +68,30 @@ def _execution_history(state: PersuasionGuardState) -> list[BaseMessage]:
     return list(state.get("execution_history", []))
 
 
+def _messages(state: PersuasionGuardState) -> list[BaseMessage]:
+    return list(state.get("messages", []))
+
+
+def ingest_turn_node(state: PersuasionGuardState) -> dict[str, Any]:
+    messages = _messages(state)
+    if not messages:
+        return {}
+    latest = messages[-1]
+    if not isinstance(latest, HumanMessage):
+        return {}
+
+    last_ingested_id = state.get("last_ingested_message_id")
+    if latest.id is not None and latest.id == last_ingested_id:
+        return {}
+
+    updates: dict[str, Any] = {"last_ingested_message_id": latest.id}
+    if state.get("phase") == "EXECUTION":
+        updates["execution_history"] = [latest]
+    else:
+        updates["chat_history"] = [latest]
+    return updates
+
+
 def _serialize_tool_output(output: Any) -> str:
     if isinstance(output, str):
         return output
@@ -98,7 +122,9 @@ def invoke_sanitizer_gate_with_fallback(
 
 
 def router_node(state: PersuasionGuardState, router_llm: Any) -> dict[str, Any]:
-    chat_history = _chat_history(state)
+    chat_history = _chat_history(state) or [
+        message for message in _messages(state) if isinstance(message, HumanMessage)
+    ]
     if not chat_history:
         decision = RouterDecision(
             is_task=False,
@@ -203,7 +229,11 @@ def executor_node(
     tool_call_count = 0
 
     if not tools_by_name:
-        return {"execution_history": appended_messages, "phase": "EXECUTION"}
+        return {
+            "execution_history": appended_messages,
+            "messages": [response],
+            "phase": "EXECUTION",
+        }
 
     current_response = response
     rounds = 0
@@ -259,6 +289,7 @@ def executor_node(
 
     return {
         "execution_history": appended_messages,
+        "messages": [current_response],
         "phase": "EXECUTION",
         "tool_call_count": tool_call_count,
     }
@@ -278,6 +309,7 @@ def chat_node(state: PersuasionGuardState, chat_llm: Any) -> dict[str, Any]:
 
     return {
         "chat_history": [response],
+        "messages": [response],
         "current_topic_summary": _message_text(summary_response),
         "phase": "CHAT",
     }

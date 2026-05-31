@@ -22,6 +22,7 @@ class SanitizerGateDecision(BaseModel):
 
 
 class PersuasionGuardState(TypedDict, total=False):
+    messages: Annotated[list[BaseMessage], add_messages]
     chat_history: Annotated[list[BaseMessage], add_messages]
     execution_history: Annotated[list[BaseMessage], add_messages]
     phase: Literal["CHAT", "EXECUTION"]
@@ -30,3 +31,4 @@ class PersuasionGuardState(TypedDict, total=False):
     router_decision: RouterDecision | None
     sanitizer_required: bool | None
     tool_call_count: int | None
+    last_ingested_message_id: str | None

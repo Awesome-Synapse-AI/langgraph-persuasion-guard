@@ -11,6 +11,7 @@ from .modeling import RoleModelConfig, build_models
 from .nodes import (
     chat_node,
     executor_node,
+    ingest_turn_node,
     router_node,
     sanitizer_gate_node,
     sanitizer_node,
@@ -20,7 +21,7 @@ from .state import PersuasionGuardState
 ModelMap = Mapping[str, BaseChatModel | Any]
 
 
-def route_from_start(
+def route_after_ingest(
     state: PersuasionGuardState,
 ) -> Literal["router_node", "sanitizer_gate_node"]:
     execution_history = state.get("execution_history") or []
@@ -88,6 +89,7 @@ def build_persuasion_guard_graph(
         if hasattr(bound_executor, "bind_tools"):
             bound_executor = bound_executor.bind_tools(list(tool_map.values()))
 
+    graph.add_node("ingest_turn_node", ingest_turn_node)
     graph.add_node("router_node", lambda state: router_node(state, active_models["router"]))
     graph.add_node(
         "sanitizer_node",
@@ -108,14 +110,18 @@ def build_persuasion_guard_graph(
     )
     graph.add_node("chat_node", lambda state: chat_node(state, active_models["chat"]))
 
-    graph.add_conditional_edges(START, route_from_start)
+    graph.add_edge(START, "ingest_turn_node")
+    graph.add_conditional_edges("ingest_turn_node", route_after_ingest)
     graph.add_conditional_edges("router_node", route_after_router)
     graph.add_conditional_edges("sanitizer_gate_node", route_after_sanitizer_gate)
     graph.add_edge("sanitizer_node", "executor_node")
     graph.add_edge("executor_node", END)
     graph.add_edge("chat_node", END)
 
-    return graph.compile(checkpointer=checkpointer or InMemorySaver())
+    if checkpointer is None:
+        checkpointer = InMemorySaver() 
+
+    return graph.compile(checkpointer=checkpointer)
 
 
 def create_persuasion_guard(
