@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langgraph-persuasion-guard"
+version = "0.1.0"
+description = "Provider-agnostic persuasion guard built with LangChain and LangGraph."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Awesome Synapse AI" }
+]
+dependencies = [
+  "langchain>=1.3.1",
+  "langchain-core>=1.4.0",
+  "langgraph>=1.2.1",
+  "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+providers = [
+  "langchain-openai>=1.2.2",
+  "langchain-anthropic>=1.1.0",
+  "langchain-google-genai>=2.1.0",
+  "langchain-aws>=0.2.0",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
