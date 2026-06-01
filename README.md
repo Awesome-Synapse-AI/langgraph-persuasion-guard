@@ -2,60 +2,120 @@
 
 Provider-agnostic persuasion guard built with LangChain and LangGraph.
 
-Implementation code lives under `src/langgraph_persuasion_guard` and follows the design in `implementation-guide.md`.
+Implementation code lives under `src/langgraph_persuasion_guard`.
 
-## Graph Flow
+## Project Overview
 
-```mermaid
-flowchart TD
-    S([START])
-    R[router_node<br/>classify latest chat message]
-    SG[sanitizer_gate_node<br/>decide requires_sanitizer]
-    SN[sanitizer_node<br/>build genesis brief + handoff]
-    E[executor_node<br/>run isolated task execution]
-    C[chat_node<br/>normal chat + topic summary]
-    X([END])
+Problem context: when an agent is belief-prefilled at task time, it may explore less and become less objective. Reported results from [Understanding Persuasion in Long-Running Agents](https://arxiv.org/abs/2602.00851) show belief-prefilled agents perform 26.9% fewer searches and visit 16.9% fewer unique sources than neutral-prefilled agents. This suggests prior persuasion can materially influence downstream agent behavior.
 
-    S -->|phase==EXECUTION AND execution_history[-1] is HumanMessage| SG
-    S -->|otherwise| R
+This project aims to mitigate that problem by routing execution through a guarded flow (including sanitization when needed) so task behavior is less vulnerable to prior persuasive framing.
 
-    R -->|phase==EXECUTION (router_decision.is_task=true)| SG
-    R -->|phase==CHAT (router_decision.is_task=false)| C
+## Proposed Solution
 
-    SG -->|sanitizer_required=true| SN
-    SG -->|sanitizer_required=false| E
+`langgraph-persuasion-guard` is a stateful LangGraph agent that separates normal conversation from task execution.
 
-    SN --> E
-    E --> X
-    C --> X
-```
+The graph maintains a shared state (`PersuasionGuardState`) and routes each user turn into one of two modes:
 
-Routing details from code:
-- `route_from_start`: skips router and resumes execution at `sanitizer_gate_node` only for execution follow-up turns where the latest `execution_history` item is a `HumanMessage`.
-- `route_after_router`: sends task-initiation to execution path (`sanitizer_gate_node`), otherwise to chat path (`chat_node`).
-- `route_after_sanitizer_gate`: runs `sanitizer_node` when sanitization is required, else executes directly with `executor_node`.
+- `CHAT`: regular assistant conversation with topic continuity.
+- `EXECUTION`: task-oriented execution flow with an optional sanitization step before execution.
 
-You can configure models via:
-- global environment defaults (`MODEL_NAME`, optional `MODEL_PROVIDER`)
-- role-specific environment variables (`ROUTER_*`, `SANITIZER_*`, `EXECUTOR_*`, `CHAT_*`)
-- Python arguments (`default_model`, `default_provider`, `role_model_overrides`)
+Core goals:
 
-Quick start:
+- Keep conversational context (`chat_history`, `current_topic_summary`) for normal dialogue.
+- Isolate execution context (`execution_history`) for task-follow-up turns.
+- Add a sanitizer gate that can enforce safer execution handoffs.
+- Support model/provider overrides by role (`router`, `sanitizer`, `executor`, `chat`).
+
+## How `graph.py` Works
+
+The graph is assembled from six nodes:
+
+- `ingest_turn_node`: normalizes incoming input into graph state.
+- `router_node`: decides whether the turn is chat or execution.
+- `sanitizer_gate_node`: decides whether sanitization is required for execution.
+- `sanitizer_node`: builds a "genesis brief" / sanitized handoff instruction.
+- `executor_node`: performs execution-style response generation (and optional tool use).
+- `chat_node`: handles normal chat responses.
+
+Routing logic in simple terms:
+
+1. Start at `ingest_turn_node`.
+2. If you are already in execution mode and the newest execution message is from the user, skip re-routing and continue execution directly.
+3. Otherwise run the router:
+   - If router says "execution", go to sanitizer gate.
+   - If router says "chat", go to chat node and finish.
+4. In execution flow:
+   - If sanitizer is required, run sanitizer first, then executor.
+   - If not required, go straight to executor.
+5. End after `chat_node` or `executor_node`.
+
+Other key behavior in `graph.py`:
+
+- It requires four role models: `router`, `sanitizer`, `executor`, `chat`.
+- If tools are provided, they are bound to the executor model (when the model supports `bind_tools`).
+- It compiles the graph with a checkpointer. If you do not pass one, it uses in-memory checkpointing (`InMemorySaver`).
+- `create_persuasion_guard(...)` is a convenience wrapper around `build_persuasion_guard_graph(...)`.
+
+## Install Required Libraries
+
+### Option A: Install from this repository (recommended for development)
 
 ```bash
 pip install -e .
-python examples/run_demo.py
 ```
 
-PowerShell example:
+This installs the package from source using dependencies in `pyproject.toml`.
 
-```powershell
-$env:MODEL_NAME = "gpt-4o-mini"
-$env:MODEL_PROVIDER = "openai"
-python examples/run_demo.py
+### Option B: Install explicit requirements file
+
+```bash
+pip install -r requirements.txt
 ```
 
-Python config example (no environment variables required):
+Note: `requirements.txt` in this repo currently includes OpenAI-specific extras for the demo.
+
+### Provider-specific dependencies
+
+Core package dependencies are provider-agnostic. Install provider integrations you need, for example:
+
+```bash
+pip install "langgraph-persuasion-guard[providers]"
+```
+
+That extra includes currently listed provider packages:
+
+- `langchain-openai`
+- `langchain-anthropic`
+- `langchain-google-genai`
+- `langchain-aws`
+
+## Install From Pip
+
+If the package is published on PyPI under this project name:
+
+```bash
+pip install langgraph-persuasion-guard
+```
+
+For provider integrations at install time:
+
+```bash
+pip install "langgraph-persuasion-guard[providers]"
+```
+
+If your environment cannot find the package on PyPI yet, install from source (`pip install -e .`) until publication is available.
+
+## Configure The Agent (Detailed)
+
+You can configure models in three layers (highest priority first):
+
+1. `role_model_overrides` argument in Python
+2. Role-specific environment variables (`ROUTER_*`, `SANITIZER_*`, `EXECUTOR_*`, `CHAT_*`)
+3. Global defaults (`default_model`/`default_provider` args or `MODEL_NAME`/`MODEL_PROVIDER` env)
+
+`chat_max_tokens` is a special override applied only to the `chat` role.
+
+### Minimum Python-only configuration (no env vars)
 
 ```python
 from langgraph_persuasion_guard import create_persuasion_guard
@@ -68,20 +128,97 @@ agent = create_persuasion_guard(
 )
 ```
 
-Role override example:
+### Full role override configuration
 
 ```python
 from langgraph_persuasion_guard import RoleModelConfig, create_persuasion_guard
 
 agent = create_persuasion_guard(
-    default_model="gpt-4o-mini",
-    default_provider="openai",
-    chat_max_tokens=768,
+    default_model="gpt-4o-mini",          # fallback if a role is not overridden
+    default_provider="openai",            # fallback provider if a role is not overridden
+    max_tool_round_trips=8,                # max tool-call loops in executor node
+    chat_max_tokens=768,                   # force chat role max_tokens
+    use_env=True,                          # allow env vars to be read
     role_model_overrides={
-        "router": RoleModelConfig(model="gpt-4o-mini", model_provider="openai", temperature=0.0),
-        "chat": RoleModelConfig(model="gpt-4o", model_provider="openai", temperature=0.7),
+        "router": RoleModelConfig(
+            model="gpt-4o-mini",
+            model_provider="openai",
+            temperature=0.0,
+            max_tokens=256,
+        ),
+        "sanitizer": RoleModelConfig(
+            model="gpt-4o-mini",
+            model_provider="openai",
+            temperature=0.2,
+            max_tokens=512,
+        ),
+        "executor": RoleModelConfig(
+            model="gpt-4o-mini",
+            model_provider="openai",
+            temperature=0.0,
+            max_tokens=1024,
+        ),
+        "chat": RoleModelConfig(
+            model="gpt-4o",
+            model_provider="openai",
+            temperature=0.7,
+            max_tokens=1024,
+        ),
     },
 )
+```
 
-`chat_max_tokens` applies only to the chat model and overrides chat role/env `max_tokens` when provided.
+### Environment variable reference
+
+Global:
+
+- `MODEL_NAME`
+- `MODEL_PROVIDER`
+
+Per-role (replace `<ROLE>` with `ROUTER`, `SANITIZER`, `EXECUTOR`, `CHAT`):
+
+- `<ROLE>_MODEL_NAME`
+- `<ROLE>_MODEL_PROVIDER`
+- `<ROLE>_TEMPERATURE`
+- `<ROLE>_MAX_TOKENS`
+
+Example:
+
+```bash
+export MODEL_NAME=gpt-4o-mini
+export MODEL_PROVIDER=openai
+export ROUTER_TEMPERATURE=0.0
+export SANITIZER_TEMPERATURE=0.2
+export EXECUTOR_MAX_TOKENS=1200
+export CHAT_MODEL_NAME=gpt-4o
+export CHAT_MAX_TOKENS=800
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:MODEL_NAME = "gpt-4o-mini"
+$env:MODEL_PROVIDER = "openai"
+$env:ROUTER_TEMPERATURE = "0.0"
+$env:SANITIZER_TEMPERATURE = "0.2"
+$env:EXECUTOR_MAX_TOKENS = "1200"
+$env:CHAT_MODEL_NAME = "gpt-4o"
+$env:CHAT_MAX_TOKENS = "800"
+```
+
+### Behavior notes
+
+- If no model can be resolved for any role, construction raises `ValueError`.
+- Default temperatures (when not explicitly set) are:
+  - `router=0.0`
+  - `sanitizer=0.2`
+  - `executor=0.0`
+  - `chat=0.7`
+- `use_env=False` disables all environment-variable reads.
+
+## Quick Start
+
+```bash
+pip install -e .
+python examples/run_demo.py
 ```
