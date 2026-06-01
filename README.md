@@ -28,6 +28,8 @@ Core goals:
 
 ## How `graph.py` Works
 
+![Agent workflow](agent-workflow.png)
+
 The graph is assembled from six nodes:
 
 - `ingest_turn_node`: normalizes incoming input into graph state.
