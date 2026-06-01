@@ -1,6 +1,7 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
@@ -71,6 +72,7 @@ def build_models(
     default_model: str | None = None,
     default_provider: str | None = None,
     role_overrides: Mapping[RoleName, RoleModelConfig] | None = None,
+    chat_max_tokens: int | None = None,
     use_env: bool = True,
 ) -> dict[str, BaseChatModel]:
     resolved_default_model = default_model or _read_env("MODEL_NAME", use_env=use_env)
@@ -79,15 +81,16 @@ def build_models(
     )
     overrides = dict(role_overrides or {})
 
-    return {
-        role: build_model(
-            overrides.get(role)
-            or _build_role_config(
-                role,
-                default_model=resolved_default_model,
-                default_provider=resolved_default_provider,
-                use_env=use_env,
-            )
+    models: dict[str, BaseChatModel] = {}
+    for role in ("router", "sanitizer", "executor", "chat"):
+        cfg = overrides.get(role) or _build_role_config(
+            role,
+            default_model=resolved_default_model,
+            default_provider=resolved_default_provider,
+            use_env=use_env,
         )
-        for role in ("router", "sanitizer", "executor", "chat")
-    }
+        if role == "chat" and chat_max_tokens is not None:
+            cfg = replace(cfg, max_tokens=chat_max_tokens)
+        models[role] = build_model(cfg)
+
+    return models

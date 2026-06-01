@@ -58,6 +58,7 @@ def build_persuasion_guard_graph(
     max_tool_round_trips: int = 8,
     default_model: str | None = None,
     default_provider: str | None = None,
+    chat_max_tokens: int | None = None,
     role_model_overrides: Mapping[
         Literal["router", "sanitizer", "executor", "chat"], RoleModelConfig
     ]
@@ -73,6 +74,7 @@ def build_persuasion_guard_graph(
                 default_model=default_model,
                 default_provider=default_provider,
                 role_overrides=role_model_overrides,
+                chat_max_tokens=chat_max_tokens,
                 use_env=use_env,
             )
         )
@@ -131,6 +133,7 @@ def create_persuasion_guard(
     max_tool_round_trips: int = 8,
     default_model: str | None = None,
     default_provider: str | None = None,
+    chat_max_tokens: int | None = None,
     role_model_overrides: Mapping[
         Literal["router", "sanitizer", "executor", "chat"], RoleModelConfig
     ]
@@ -144,6 +147,7 @@ def create_persuasion_guard(
         max_tool_round_trips=max_tool_round_trips,
         default_model=default_model,
         default_provider=default_provider,
+        chat_max_tokens=chat_max_tokens,
         role_model_overrides=role_model_overrides,
         use_env=use_env,
         checkpointer=checkpointer,

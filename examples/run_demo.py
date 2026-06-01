@@ -132,6 +132,7 @@ def main() -> None:
     agent = create_persuasion_guard(
         default_model=model_name,
         default_provider=model_provider,
+        chat_max_tokens = 1024
     )
     config = {"configurable": {"thread_id": "session_01"}}
     repo_root = Path(__file__).resolve().parents[1]

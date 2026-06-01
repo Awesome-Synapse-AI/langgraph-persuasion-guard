@@ -63,6 +63,7 @@ from langgraph_persuasion_guard import create_persuasion_guard
 agent = create_persuasion_guard(
     default_model="gpt-4o-mini",
     default_provider="openai",
+    chat_max_tokens=512,
     use_env=False,
 )
 ```
@@ -75,9 +76,12 @@ from langgraph_persuasion_guard import RoleModelConfig, create_persuasion_guard
 agent = create_persuasion_guard(
     default_model="gpt-4o-mini",
     default_provider="openai",
+    chat_max_tokens=768,
     role_model_overrides={
         "router": RoleModelConfig(model="gpt-4o-mini", model_provider="openai", temperature=0.0),
         "chat": RoleModelConfig(model="gpt-4o", model_provider="openai", temperature=0.7),
     },
 )
+
+`chat_max_tokens` applies only to the chat model and overrides chat role/env `max_tokens` when provided.
 ```
