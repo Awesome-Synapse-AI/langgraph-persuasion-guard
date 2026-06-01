@@ -91,7 +91,17 @@ That extra includes currently listed provider packages:
 
 ## Install From Pip
 
-If the package is published on PyPI under this project name:
+The package is published on PyPI here:
+
+- https://pypi.org/project/langgraph-persuasion-guard/0.1.0/
+
+Install version `0.1.0` with:
+
+```bash
+pip install langgraph-persuasion-guard==0.1.0
+```
+
+Install latest with:
 
 ```bash
 pip install langgraph-persuasion-guard
@@ -102,8 +112,6 @@ For provider integrations at install time:
 ```bash
 pip install "langgraph-persuasion-guard[providers]"
 ```
-
-If your environment cannot find the package on PyPI yet, install from source (`pip install -e .`) until publication is available.
 
 ## Configure The Agent (Detailed)
 
