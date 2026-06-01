@@ -224,6 +224,84 @@ $env:CHAT_MAX_TOKENS = "800"
   - `chat=0.7`
 - `use_env=False` disables all environment-variable reads.
 
+## Using Tools
+
+You can pass LangChain tools into `create_persuasion_guard(...)`.  
+The graph binds tools to the `executor` model and executes tool calls during execution turns.
+
+### Example: single tool
+
+```python
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
+from langgraph_persuasion_guard import create_persuasion_guard
+
+@tool
+def add_numbers(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+agent = create_persuasion_guard(
+    default_model="gpt-4o-mini",
+    default_provider="openai",
+    tools=[add_numbers],
+)
+
+result = agent.invoke(
+    {
+        "chat_history": [
+            HumanMessage(content="Calculate 17 + 25 using the tool.")
+        ]
+    },
+    {"configurable": {"thread_id": "tools-demo-1"}},
+)
+```
+
+### Example: multiple tools + tool round-trip limit
+
+```python
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
+from langgraph_persuasion_guard import create_persuasion_guard
+
+@tool
+def multiply(a: int, b: int) -> int:
+    """Multiply two integers."""
+    return a * b
+
+@tool
+def get_today_iso() -> str:
+    """Return today's date in ISO format."""
+    from datetime import date
+    return date.today().isoformat()
+
+agent = create_persuasion_guard(
+    default_model="gpt-4o-mini",
+    default_provider="openai",
+    tools=[multiply, get_today_iso],
+    max_tool_round_trips=4,  # stop after 4 tool-call loops
+)
+
+result = agent.invoke(
+    {
+        "chat_history": [
+            HumanMessage(
+                content=(
+                    "Use tools to compute 12 * 9, then include today's date in the answer."
+                )
+            )
+        ]
+    },
+    {"configurable": {"thread_id": "tools-demo-2"}},
+)
+```
+
+### Tool behavior notes
+
+- Tools run only in `EXECUTION` flow (not regular `CHAT` responses).
+- If the model requests a tool that is not provided, the graph returns a tool error message internally.
+- `tool_call_count` is stored in the returned state for execution turns.
+
 ## Quick Start
 
 ```bash
