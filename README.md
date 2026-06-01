@@ -6,7 +6,7 @@ Implementation code lives under `src/langgraph_persuasion_guard`.
 
 ## Project Overview
 
-Problem context: when an agent is belief-prefilled at task time, it may explore less and become less objective. Reported results from [Understanding Persuasion in Long-Running Agents](https://arxiv.org/abs/2602.00851) show belief-prefilled agents perform 26.9% fewer searches and visit 16.9% fewer unique sources than neutral-prefilled agents. This suggests prior persuasion can materially influence downstream agent behavior.
+Problem context: when an agent is belief-prefilled at task time, it may explore less and become less objective. Reported results from [Understanding Persuasion in Long-Running Agents](https://arxiv.org/abs/2602.00851) show that belief-prefilled agents perform 26.9% fewer searches and visit 16.9% fewer unique sources than neutral-prefilled agents. This suggests prior persuasion can materially influence downstream agent behavior.
 
 This project aims to mitigate that problem by routing execution through a guarded flow (including sanitization when needed) so task behavior is less vulnerable to prior persuasive framing.
 
